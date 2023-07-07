@@ -68,6 +68,7 @@ class CoreMapper : public Mapper {
   const uint32_t field_reuse_frac;
   const uint32_t field_reuse_freq;
   const uint32_t max_lru_length;
+  const bool use_consensus_multi_node;
 };
 
 CoreMapper::CoreMapper()
@@ -87,7 +88,9 @@ CoreMapper::CoreMapper()
     field_reuse_freq(
       extract_env("LEGATE_FIELD_REUSE_FREQ", FIELD_REUSE_FREQ_DEFAULT, FIELD_REUSE_FREQ_TEST)),
     max_lru_length(
-      extract_env("LEGATE_MAX_LRU_LENGTH", MAX_LRU_LENGTH_DEFAULT, MAX_LRU_LENGTH_TEST))
+      extract_env("LEGATE_MAX_LRU_LENGTH", MAX_LRU_LENGTH_DEFAULT, MAX_LRU_LENGTH_TEST)),
+    use_consensus_multi_node(static_cast<bool>(
+        extract_env("LEGATE_USE_CONSENSUS_MULTI_NODE", USE_CONSENSUS_MULTI_NODE_DEFAULT, USE_CONSENSUS_MULTI_NODE_TEST)))
 {
 }
 
@@ -163,6 +166,9 @@ Scalar CoreMapper::tunable_value(TunableID tunable_id)
 #else
       return false;
 #endif
+    }
+    case LEGATE_CORE_TUNABLE_USE_CONSENSUS_MULTI_NODE: {
+      return use_consensus_multi_node;
     }
   }
   // Illegal tunable variable

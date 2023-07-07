@@ -1066,11 +1066,20 @@ class Runtime:
                 ty.uint64,
             )
         )
+        self._use_consensus_multi_node = bool(
+            self._core_context.get_tunable(
+                legion.LEGATE_CORE_TUNABLE_USE_CONSENSUS_MULTI_NODE,
+                ty.bool_,
+            )
+        )
+        print(f"USE_CONSENSUS_MULTI_NODE: {self._use_consensus_multi_node}")
         self._field_manager_class = (
             ConsensusMatchingFieldManager
-            if self._num_nodes > 1 or settings.consensus()
+            if (self._num_nodes > 1 and self._use_consensus_multi_node)
+            or settings.consensus()
             else FieldManager
         )
+        print(f"Field manager type: {self._field_manager_class}")
         self._max_lru_length = int(
             self._core_context.get_tunable(
                 legion.LEGATE_CORE_TUNABLE_MAX_LRU_LENGTH,

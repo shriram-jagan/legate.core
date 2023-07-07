@@ -63,6 +63,7 @@ typedef enum legate_core_tunable_t {
   LEGATE_CORE_TUNABLE_FIELD_REUSE_FREQUENCY,
   LEGATE_CORE_TUNABLE_MAX_LRU_LENGTH,
   LEGATE_CORE_TUNABLE_NCCL_NEEDS_BARRIER,
+  LEGATE_CORE_TUNABLE_USE_CONSENSUS_MULTI_NODE,
 } legate_core_tunable_t;
 
 typedef enum legate_core_variant_t {
