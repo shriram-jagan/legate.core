@@ -41,16 +41,16 @@ class LegateRuntimeSettings(Settings):
     )
 
     use_consensus_multi_node: PrioritizedSetting[bool] = PrioritizedSetting(
-            "use_consensus_multi_node",
-            "LEGATE_USE_CONSENSUS_MULTI_NODE",
-            default=True,
-            convert=convert_bool,
-            help="""
-            This turns on/off the consensus matching algorithm for
-            multi-node runs. Make note that the consensus setting controls
-            whether to use consensus matching algorithm for single-node runs.
-            """,
-            )
+        "use_consensus_multi_node",
+        "LEGATE_USE_CONSENSUS_MULTI_NODE",
+        default=True,
+        convert=convert_bool,
+        help="""
+        This turns on/off the consensus matching algorithm for
+        multi-node runs. Make note that the consensus setting controls
+        whether to use consensus matching algorithm for single-node runs.
+        """,
+    )
 
     cycle_check: PrioritizedSetting[bool] = PrioritizedSetting(
         "cycle_check",

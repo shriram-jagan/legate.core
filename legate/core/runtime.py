@@ -364,35 +364,68 @@ class FieldManager:
         self.free_fields = deque()
 
     def try_reuse_field(self) -> Optional[tuple[Region, int]]:
+        if not self.runtime._use_consensus_multi_node:
+            print(f"Warning! Field {self.shape}, {field_size} was attempted to be reused.")
+            
         return (
             self.free_fields.popleft() if len(self.free_fields) > 0 else None
         )
 
     def allocate_field(self) -> tuple[Region, int]:
-        if (result := self.try_reuse_field()) is not None:
-            region_manager = self.runtime.find_region_manager(result[0])
-            if region_manager.increase_active_field_count():
+        # Corresponds to the case when we don't want to do consensus matching
+        if not self.runtime._use_consensus_multi_node:
+            # consensus matching always turned off for single node
+            assert self.runtime._num_nodes > 1
+
+            region_manager = self.runtime.find_or_create_region_manager(self.shape)
+            region, field_id, revived = region_manager.allocate_field(
+                self.field_size
+            )
+        else:
+            # reuse existing free field
+            if (result := self.try_reuse_field()) is not None:
+                region_manager = self.runtime.find_region_manager(result[0])
+                if region_manager.increase_active_field_count():
+                    self.runtime.revive_manager(region_manager)
+                return result
+
+            # no free field available to reuse. create or find region manager
+            region_manager = self.runtime.find_or_create_region_manager(self.shape)
+            region, field_id, revived = region_manager.allocate_field(
+                self.field_size
+            )
+            if revived:
                 self.runtime.revive_manager(region_manager)
-            return result
-        region_manager = self.runtime.find_or_create_region_manager(self.shape)
-        region, field_id, revived = region_manager.allocate_field(
-            self.field_size
-        )
-        if revived:
-            self.runtime.revive_manager(region_manager)
         return region, field_id
 
     def free_field(
         self, region: Region, field_id: int, ordered: bool = False
     ) -> None:
-        self.free_fields.append((region, field_id))
-        region_manager = self.runtime.find_region_manager(region)
-        if region_manager.decrease_active_field_count():
-            self.runtime.free_region_manager(
-                self.shape, region, unordered=not ordered
-            )
+        # Corresponds to the case when we don't want to do consensus matching
+        if not self.runtime._use_consensus_multi_node:
+            if ordered:
+                print(f"Warning! Ordered deletes not permitted")
+            region_manager = self.runtime.find_region_manager(region)
+
+            # free the field
+            print(f"Freeing the field {field_id} in {region}")
+            self.region.field_space.destroy_field(field_id, unordered=True)
+            if region_manager.decrease_active_field_count():
+                self.runtime.free_region_manager(
+                    self.shape, region, unordered=True
+                )
+        else:
+            self.free_fields.append((region, field_id))
+            region_manager = self.runtime.find_region_manager(region)
+            if region_manager.decrease_active_field_count():
+                self.runtime.free_region_manager(
+                    self.shape, region, unordered=not ordered
+                )
 
     def remove_all_fields(self, region: Region) -> None:
+        if not self.runtime._use_consensus_multi_node and len(self.free_fields) > 0:
+            print(f"Warning! remove_all_fields found free fields for {region}")
+
         self.free_fields = deque(f for f in self.free_fields if f[0] != region)
 
 
@@ -403,6 +436,10 @@ class ConsensusMatchingFieldManager(FieldManager):
         super().__init__(runtime, shape, field_size)
         self._field_match_manager = runtime.field_match_manager
         self._update_match_credit()
+
+        # this class should not be used when we don't want to use
+        # consensus matching
+        assert not self.runtime._use_consensus_multi_node
 
     def _update_match_credit(self) -> None:
         if self.shape.fixed:
@@ -1071,8 +1108,10 @@ class Runtime:
                 legion.LEGATE_CORE_TUNABLE_USE_CONSENSUS_MULTI_NODE,
                 ty.bool_,
             )
-        )
+        ) 
+        #and self._num_nodes > 1
         print(f"USE_CONSENSUS_MULTI_NODE: {self._use_consensus_multi_node}")
+
         self._field_manager_class = (
             ConsensusMatchingFieldManager
             if (self._num_nodes > 1 and self._use_consensus_multi_node)
