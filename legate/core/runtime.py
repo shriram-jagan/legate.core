@@ -375,12 +375,15 @@ class FieldManager:
         # Corresponds to the case when we don't want to do consensus matching
         if not self.runtime._use_consensus_multi_node:
             # consensus matching always turned off for single node
-            assert self.runtime._num_nodes > 1
+            #assert self.runtime._num_nodes > 1
 
             region_manager = self.runtime.find_or_create_region_manager(self.shape)
             region, field_id, revived = region_manager.allocate_field(
                 self.field_size
             )
+            print(f"Alloc: Field {field_id}, field_size: {self.field_size}, region: {region}, shape: {self.shape}")
+            if revived:
+                self.runtime.revive_manager(region_manager)
         else:
             # reuse existing free field
             if (result := self.try_reuse_field()) is not None:
@@ -408,8 +411,8 @@ class FieldManager:
             region_manager = self.runtime.find_region_manager(region)
 
             # free the field
-            print(f"Freeing the field {field_id} in {region}")
-            self.region.field_space.destroy_field(field_id, unordered=True)
+            print(f"Free : Field {field_id}, field_size: {self.field_size}, region: {region}, shape: {self.shape}")
+            region_manager._region.field_space.destroy_field(field_id, unordered=True)
             if region_manager.decrease_active_field_count():
                 self.runtime.free_region_manager(
                     self.shape, region, unordered=True
@@ -437,9 +440,11 @@ class ConsensusMatchingFieldManager(FieldManager):
         self._field_match_manager = runtime.field_match_manager
         self._update_match_credit()
 
+        print(f"ConsensusMatchingFieldManager has been Initialized")
+
         # this class should not be used when we don't want to use
         # consensus matching
-        assert not self.runtime._use_consensus_multi_node
+        #assert not self.runtime._use_consensus_multi_node
 
     def _update_match_credit(self) -> None:
         if self.shape.fixed:
@@ -1111,6 +1116,8 @@ class Runtime:
         ) 
         #and self._num_nodes > 1
         print(f"USE_CONSENSUS_MULTI_NODE: {self._use_consensus_multi_node}")
+        self._use_consensus_multi_node = False
+        print(f"setting USE_CONSENSUS_MULTI_NODE to: {self._use_consensus_multi_node}")
 
         self._field_manager_class = (
             ConsensusMatchingFieldManager
