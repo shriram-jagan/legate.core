@@ -381,7 +381,6 @@ class FieldManager:
             region, field_id, revived = region_manager.allocate_field(
                 self.field_size
             )
-            print(f"Alloc: Field {field_id}, field_size: {self.field_size}, region: {region}, shape: {self.shape}")
             if revived:
                 self.runtime.revive_manager(region_manager)
         else:
@@ -411,11 +410,10 @@ class FieldManager:
             region_manager = self.runtime.find_region_manager(region)
 
             # free the field
-            print(f"Free : Field {field_id}, field_size: {self.field_size}, region: {region}, shape: {self.shape}")
             region_manager._region.field_space.destroy_field(field_id, unordered=True)
             if region_manager.decrease_active_field_count():
                 self.runtime.free_region_manager(
-                    self.shape, region, unordered=True
+                    self.shape, region, unordered=not ordered
                 )
         else:
             self.free_fields.append((region, field_id))
@@ -439,8 +437,6 @@ class ConsensusMatchingFieldManager(FieldManager):
         super().__init__(runtime, shape, field_size)
         self._field_match_manager = runtime.field_match_manager
         self._update_match_credit()
-
-        print(f"ConsensusMatchingFieldManager has been Initialized")
 
         # this class should not be used when we don't want to use
         # consensus matching
@@ -1114,7 +1110,7 @@ class Runtime:
                 ty.bool_,
             )
         ) 
-        #and self._num_nodes > 1
+
         print(f"USE_CONSENSUS_MULTI_NODE: {self._use_consensus_multi_node}")
         self._use_consensus_multi_node = False
         print(f"setting USE_CONSENSUS_MULTI_NODE to: {self._use_consensus_multi_node}")
@@ -1125,7 +1121,6 @@ class Runtime:
             or settings.consensus()
             else FieldManager
         )
-        print(f"Field manager type: {self._field_manager_class}")
         self._max_lru_length = int(
             self._core_context.get_tunable(
                 legion.LEGATE_CORE_TUNABLE_MAX_LRU_LENGTH,
