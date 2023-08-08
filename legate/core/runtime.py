@@ -141,16 +141,21 @@ class LibraryAnnotations:
 # This class keeps track of usage of a single region
 class RegionManager:
     def __init__(
-        self, shape: Shape, region: Region, imported: bool = False
+        self, shape: Shape, region: Region, imported: bool = False, verbose: bool = False,
     ) -> None:
         self._shape = shape
         self._region = region
         # Monotonically increases as more fields are allocated
         self._alloc_field_count = 0
         # Fluctuates based on field usage
-        self._active_field_count = 0
+        self._active_field_count = LEGATE_MAX_FIELDS + 1 
+
         self._next_field_id = _LEGATE_FIELD_ID_BASE
         self._imported = imported
+        self._verbose = verbose
+
+        if self._verbose:
+            print(f"Create new region manager: {self._shape._extents}")
 
     @property
     def region(self) -> Region:
@@ -166,16 +171,18 @@ class RegionManager:
         # unordered destructions
         self._region.destroy(unordered)
 
-    def increase_active_field_count(self) -> None:
-        self._active_field_count += 1
-
-    def decrease_active_field_count(self) -> bool:
-        self._active_field_count -= 1
-        return self._active_field_count == 0
-
-    def increase_field_count(self) -> None:
+    def increase_field_counts(self) -> None:
+        """ Increase the allocation and active field counts"""
         self._alloc_field_count += 1
-        self.increase_active_field_count()
+        if self._active_field_count == LEGATE_MAX_FIELDS + 1:
+            self._active_field_count = self._alloc_field_count
+        else:
+            self._active_field_count += 1
+
+    def decrease_active_field_count(self) -> None:
+        assert self._active_field_count != LEGATE_MAX_FIELDS + 1
+        assert self._active_field_count != 0
+        self._active_field_count -= 1
 
     @property
     def has_space(self) -> bool:
@@ -187,14 +194,31 @@ class RegionManager:
         return field_id
 
     def allocate_field(self, field_size: Any) -> tuple[Region, int]:
+        assert self._region.field_space.has_space
         field_id = self._region.field_space.allocate_field(
             field_size, self.get_next_field_id()
         )
-        self.increase_field_count()
+        if self._verbose:
+            print(f"Alloc Field in {self._region} with ID {field_id} and size {field_size}")
+        self.increase_field_counts()
         return self._region, field_id 
 
     def destroy_field(self, field_id, unordered: bool = True):
+        if self._verbose:
+            print(f"Destroy Field in {self._region} with ID {field_id}")
+        self.decrease_active_field_count()
         self._region.field_space.destroy_field(field_id, unordered)
+
+    def can_destroy(self):
+        """ The RegionManager can be destroyed when the number of 
+        fields allocated is same as LEGATE_MAX_FIELDS and the number 
+        of active fields is 0."""
+
+        condition = not self.has_space and self._active_field_count == 0
+        if self._verbose:
+            print(f"allocd: {self._alloc_field_count}, active: {self._active_field_count}, can_destroy: {condition}")
+     
+        return condition 
 
 
 class Attachment:
@@ -338,6 +362,7 @@ class AttachmentManager:
         defer: bool = False,
         previously_deferred: bool = False,
     ) -> None:
+        print(f"Detaching external attachment")
         # If the detachment was previously deferred, then we don't
         # need to remove the allocation from the map again.
         if not previously_deferred:
@@ -824,6 +849,8 @@ class Runtime:
             )
         ) 
 
+        self._verbose = False
+
         print(f"No field management.")
 
         #print(f"USE_CONSENSUS_MULTI_NODE: {self._use_consensus_multi_node}")
@@ -846,7 +873,7 @@ class Runtime:
         # map shapes to index spaces
         self.index_spaces: dict[Rect, IndexSpace] = {}
 
-        # map from shapes to active region managers
+        # map from shapes to active region manager
         # For each shape, there is only one active region manager and this
         # information is stored in a dict: shape -> RegionManager
         self.region_managers_by_shape: dict[Shape, RegionManager] = {}
@@ -1059,7 +1086,6 @@ class Runtime:
         # Remove references to our legion resources so they can be collected
         self.region_managers_by_shape = {}
         self.region_managers_by_region = {}
-        self.field_managers = {}
         self.index_spaces = {}
         # Explicitly release the reference to the partition manager so that
         # it may be collected, releasing references to Futures and FutureMaps.
@@ -1492,13 +1518,17 @@ class Runtime:
     def destroy_region_manager(
         self, region_mgr: RegionManager, unordered: bool
     ) -> None:
-        region = region_mgr.region
-        assert region in self.region_managers_by_region
-        del self.region_managers_by_region[region]
+        """Removes the reference to the region manager and then
+        destroys the region managed by region_mgr"""
 
+        region = region_mgr.region
         shape = region_mgr.shape
-        active_mgr = self.region_managers_by_shape.get(shape)
-        if active_mgr is region_mgr:
+
+        if self._verbose:
+            print(f"Destroy region manager: {region_mgr}, {region}, {region_mgr._shape}")
+
+        del self.region_managers_by_region[region]
+        if region_mgr == self.region_managers_by_shape.get(shape):
             del self.region_managers_by_shape[shape]
         region_mgr.destroy(unordered)
 
@@ -1511,7 +1541,7 @@ class Runtime:
         field_space = self.create_field_space()
         region = self.create_region(index_space, field_space)
 
-        region_mgr = RegionManager(shape, region)
+        region_mgr = RegionManager(shape, region, verbose=self._verbose)
         self.region_managers_by_shape[shape] = region_mgr
         self.region_managers_by_region[region] = region_mgr
         return region_mgr
@@ -1537,24 +1567,34 @@ class Runtime:
         if self.destroyed:
             return
 
+        unordered = True 
         region_manager = self.find_region_manager(region)
-        region_manager.destroy_field(field_id, unordered=True)
-        if region_manager.decrease_active_field_count():
-            self.destroy_region_manager(region_manager, unordered=True)
+        region_manager.destroy_field(field_id, unordered=unordered)
+        if region_manager.can_destroy():
+            if self._verbose:
+                print(f"No space in {region}, destroying manager: {region_manager}")
+            self.destroy_region_manager(region_manager, unordered=unordered)
 
     def import_output_region(
         self, out_region: OutputRegion, field_id: int, dtype: Any
     ) -> RegionField:
         from .store import RegionField
+        print(f"import output region invoked!")
 
         region = out_region.get_region()
         shape = Shape(ispace=region.index_space)
         region_mgr = self.region_managers_by_region.get(region)
-        if region_mgr is None:
-            region_mgr = RegionManager(shape, region, imported=True)
-            self.region_managers_by_region[region] = region_mgr
+        if region_mgr is not None and not region_mgr.has_space:
+            print(f"from import_output_region; {region_mgr._region} is out of space")
+            print("... we need a new region manager ")
+            region_mgr = None
 
-        region_mgr.increase_field_count()
+        if region_mgr is None:
+            region_mgr = RegionManager(shape, region, imported=True, verbose=self._verbose)
+            self.region_managers_by_region[region] = region_mgr
+            self.region_managers_by_shape[shape] = region_mgr
+
+        region_mgr.increase_field_counts()
 
         return RegionField.create(region, field_id, dtype.size, shape)
 
