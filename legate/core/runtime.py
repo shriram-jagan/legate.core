@@ -155,7 +155,7 @@ class RegionManager:
         self._verbose = verbose
 
         if self._verbose:
-            print(f"Create new region manager: {self._shape._extents}")
+            print(f"Create new region manager: {self._region} with {self._shape._extents}, imported: {self._imported}")
 
     @property
     def region(self) -> Region:
@@ -198,14 +198,10 @@ class RegionManager:
         field_id = self._region.field_space.allocate_field(
             field_size, self.get_next_field_id()
         )
-        if self._verbose:
-            print(f"Alloc Field in {self._region} with ID {field_id} and size {field_size}")
         self.increase_field_counts()
         return self._region, field_id 
 
     def destroy_field(self, field_id, unordered: bool = True):
-        if self._verbose:
-            print(f"Destroy Field in {self._region} with ID {field_id}")
         self.decrease_active_field_count()
         self._region.field_space.destroy_field(field_id, unordered)
 
@@ -215,8 +211,7 @@ class RegionManager:
         of active fields is 0."""
 
         condition = not self.has_space and self._active_field_count == 0
-        if self._verbose:
-            print(f"allocd: {self._alloc_field_count}, active: {self._active_field_count}, can_destroy: {condition}")
+        #condition = self._active_field_count == 0
      
         return condition 
 
@@ -362,7 +357,6 @@ class AttachmentManager:
         defer: bool = False,
         previously_deferred: bool = False,
     ) -> None:
-        print(f"Detaching external attachment")
         # If the detachment was previously deferred, then we don't
         # need to remove the allocation from the map again.
         if not previously_deferred:
@@ -849,13 +843,7 @@ class Runtime:
             )
         ) 
 
-        self._verbose = False
-
-        print(f"No field management.")
-
-        #print(f"USE_CONSENSUS_MULTI_NODE: {self._use_consensus_multi_node}")
-        #self._use_consensus_multi_node = False
-        #print(f"setting USE_CONSENSUS_MULTI_NODE to: {self._use_consensus_multi_node}")
+        self._verbose = False 
 
         self._max_lru_length = int(
             self._core_context.get_tunable(
@@ -1524,9 +1512,6 @@ class Runtime:
         region = region_mgr.region
         shape = region_mgr.shape
 
-        if self._verbose:
-            print(f"Destroy region manager: {region_mgr}, {region}, {region_mgr._shape}")
-
         del self.region_managers_by_region[region]
         if region_mgr == self.region_managers_by_shape.get(shape):
             del self.region_managers_by_shape[shape]
@@ -1579,14 +1564,11 @@ class Runtime:
         self, out_region: OutputRegion, field_id: int, dtype: Any
     ) -> RegionField:
         from .store import RegionField
-        print(f"import output region invoked!")
 
         region = out_region.get_region()
         shape = Shape(ispace=region.index_space)
         region_mgr = self.region_managers_by_region.get(region)
         if region_mgr is not None and not region_mgr.has_space:
-            print(f"from import_output_region; {region_mgr._region} is out of space")
-            print("... we need a new region manager ")
             region_mgr = None
 
         if region_mgr is None:

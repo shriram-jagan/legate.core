@@ -26,6 +26,8 @@ if TYPE_CHECKING:
     from ...config import Config
     from ...test_system import TestSystem
 
+BLOAT_FACTOR = 1.1  # hard coded for now
+
 
 class GPU(TestStage):
     """A test stage for exercising GPU features.
@@ -74,7 +76,7 @@ class GPU(TestStage):
         degree = N // (config.gpus * config.ranks)
 
         fbsize = min(gpu.total for gpu in system.gpus) / (1 << 20)  # MB
-        oversub_factor = int(fbsize // (config.fbmem * config.bloat_factor))
+        oversub_factor = int(fbsize // (config.fbmem * BLOAT_FACTOR))
         workers = adjust_workers(
             degree * oversub_factor, config.requested_workers
         )
